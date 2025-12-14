@@ -6,7 +6,7 @@ declare namespace Cloudflare {
 		mainModule: typeof import("./worker/index");
 	}
 	interface Env {
-		GITHUB_URL: "https://github.com/shchahrykovich/planing-poker";
+		GITHUB_URL: "https://github.com/shchahrykovich/planning-poker";
         ALLOW_CONNECTION_FROM_CF_ZERO_TRUST_TEAM: "";
 		ROOMS: DurableObjectNamespace<import("./worker/index").PlanningPokerRoom>;
 	}
