@@ -1,0 +1,30 @@
+.voting-card {
+  width: 56px;
+  height: 80px;
+  border: 1px solid #e4e4e7;
+  border-radius: 6px;
+  background: #fafafa;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #18181b;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+
+.voting-card:hover {
+  border-color: #18181b;
+  background: #fff;
+}
+
+.voting-card:active {
+  transform: scale(0.97);
+}
+
+.voting-card.selected {
+  border-color: #18181b;
+  background: #18181b;
+  color: #fff;
+}
