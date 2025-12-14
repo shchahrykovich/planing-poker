@@ -28,7 +28,9 @@ function App() {
     // Try to get user name from Cloudflare Access first
     const fetchUserInfo = async () => {
       try {
-        const response = await fetch('/api/whoami');
+        const response = await fetch('/api/whoami', {
+          credentials: 'include', // Include cookies in the request
+        });
         if (response.ok) {
           const data = await response.json();
           if (data.authenticated && data.name) {

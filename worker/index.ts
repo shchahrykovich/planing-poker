@@ -6,6 +6,19 @@ interface Env {
 	ALLOW_CONNECTION_FROM_CF_ZERO_TRUST_TEAM?: string;
 }
 
+// Cloudflare Access identity types
+interface CloudflareGroup {
+	id: string;
+	name: string;
+}
+
+interface CloudflareIdentity {
+	id: string;
+	name: string;
+	email: string;
+	groups: CloudflareGroup[];
+}
+
 // Message types for WebSocket communication
 type ClientMessage =
 	| { type: "join"; name: string }
@@ -32,43 +45,47 @@ interface SessionData {
 	webSocket: WebSocket;
 }
 
-// Helper function to extract user info from Cloudflare Access token
-async function getCloudflareAccessUserInfo(request: Request, teamName: string): Promise<{ name: string; email: string } | null> {
+// Helper function to get CF_Authorization cookie from request
+function getCFAuthorizationCookie(request: Request): string | null {
+	const cookieHeader = request.headers.get("Cookie");
+	if (!cookieHeader) {
+		return null;
+	}
+
+	const cookies = cookieHeader.split(";").map((c) => c.trim());
+	for (const cookie of cookies) {
+		const [name, value] = cookie.split("=");
+		if (name === "CF_Authorization") {
+			return value;
+		}
+	}
+
+	return null;
+}
+
+// Helper function to get user identity from Cloudflare Access
+async function getCloudflareAccessUserInfo(request: Request, teamName: string): Promise<CloudflareIdentity | null> {
 	try {
-		const token = request.headers.get("Cf-Access-Jwt-Assertion");
-		if (!token) {
+		const cfAuthToken = getCFAuthorizationCookie(request);
+		if (!cfAuthToken) {
 			return null;
 		}
 
-		const parts = token.split(".");
-		if (parts.length !== 3) {
+		const identityUrl = `https://${teamName}.cloudflareaccess.com/cdn-cgi/access/get-identity`;
+		const response = await fetch(identityUrl, {
+			headers: {
+				Cookie: `CF_Authorization=${cfAuthToken}`,
+			},
+		});
+
+		if (!response.ok) {
 			return null;
 		}
 
-		const payload = JSON.parse(atob(parts[1])) as {
-			exp?: number;
-			aud?: string[];
-			name?: string;
-			email?: string;
-		};
-
-		// Verify token is not expired
-		const now = Math.floor(Date.now() / 1000);
-		if (payload.exp && payload.exp < now) {
-			return null;
-		}
-
-		// Verify audience matches team domain
-		if (!payload.aud || !payload.aud.some((aud: string) => aud.includes(teamName))) {
-			return null;
-		}
-
-		return {
-			name: payload.name || payload.email || "Unknown",
-			email: payload.email || "",
-		};
+		const identity = (await response.json()) as CloudflareIdentity;
+		return identity;
 	} catch (err) {
-		console.error("Error extracting user info from Cloudflare Access token:", err);
+		console.error("Error fetching user identity from Cloudflare Access:", err);
 		return null;
 	}
 }
@@ -76,54 +93,10 @@ async function getCloudflareAccessUserInfo(request: Request, teamName: string): 
 // Helper function to verify Cloudflare Zero Trust authentication
 async function verifyCloudflareAccess(request: Request, teamName: string): Promise<boolean> {
 	try {
-		// Get the JWT token from the Cf-Access-Jwt-Assertion header
-		const token = request.headers.get("Cf-Access-Jwt-Assertion");
-		if (!token) {
-			return false;
-		}
-
-		// Verify the token with Cloudflare's public key
-		const certsUrl = `https://${teamName}.cloudflareaccess.com/cdn-cgi/access/certs`;
-		const certsResponse = await fetch(certsUrl);
-		if (!certsResponse.ok) {
-			return false;
-		}
-
-		const certsData = await certsResponse.json() as { keys?: Array<{ kid: string }> };
-		const keys = certsData.keys;
-		if (!keys || keys.length === 0) {
-			return false;
-		}
-
-		// Decode the JWT header to get the key ID
-		const parts = token.split(".");
-		if (parts.length !== 3) {
-			return false;
-		}
-
-		const header = JSON.parse(atob(parts[0])) as { kid: string };
-		const payload = JSON.parse(atob(parts[1])) as { exp?: number; aud?: string[] };
-
-		// Find the matching public key
-		const key = keys.find((k: { kid: string }) => k.kid === header.kid);
-		if (!key) {
-			return false;
-		}
-
-		// Verify the token is not expired
-		const now = Math.floor(Date.now() / 1000);
-		if (payload.exp && payload.exp < now) {
-			return false;
-		}
-
-		// Verify the audience matches the team domain
-		if (!payload.aud || !payload.aud.some((aud: string) => aud.includes(teamName))) {
-			return false;
-		}
-
-		return true;
+		const identity = await getCloudflareAccessUserInfo(request, teamName);
+		return identity !== null;
 	} catch (err) {
-		console.error("Error verifying Cloudflare Access token:", err);
+		console.error("Error verifying Cloudflare Access:", err);
 		return false;
 	}
 }
@@ -187,13 +160,15 @@ export default {
 async function handleApiRequest(path: string[], request: Request, env: Env): Promise<Response> {
 	switch (path[0]) {
 		case "whoami": {
-			// Return user info from Cloudflare Access token if available
+			// Return user info from Cloudflare Access if available
 			if (env.ALLOW_CONNECTION_FROM_CF_ZERO_TRUST_TEAM) {
-				const userInfo = await getCloudflareAccessUserInfo(request, env.ALLOW_CONNECTION_FROM_CF_ZERO_TRUST_TEAM);
-				if (userInfo) {
+				const identity = await getCloudflareAccessUserInfo(request, env.ALLOW_CONNECTION_FROM_CF_ZERO_TRUST_TEAM);
+				if (identity) {
 					return new Response(JSON.stringify({
-						name: userInfo.name,
-						email: userInfo.email,
+						id: identity.id,
+						name: identity.name,
+						email: identity.email,
+						groups: identity.groups,
 						authenticated: true,
 					}), {
 						headers: {
@@ -206,8 +181,10 @@ async function handleApiRequest(path: string[], request: Request, env: Env): Pro
 
 			// Return empty result if CF auth is disabled or no token
 			return new Response(JSON.stringify({
+				id: "",
 				name: "",
 				email: "",
+				groups: [],
 				authenticated: false,
 			}), {
 				headers: {
