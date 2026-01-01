@@ -12,6 +12,6 @@ Planning Poker (also known as Scrum Poker) is a collaborative estimation techniq
 1. git remote add upstream https://github.com/shchahrykovich/planning-poker.git
 2. git fetch upstream   
 3. git checkout main 
-4. git merge upstream/main --allow-unrelated-histories -X theirs 
-5. git commit -m "Merge upstream/main (accept upstream changes)"
+4. git merge upstream/main --allow-unrelated-histories -X ours --no-edit
+5. git commit -m "Merge upstream/main (accept ours changes)"
 6. git push origin main --force-with-lease
